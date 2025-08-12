@@ -1,0 +1,15 @@
+llm:
+  provider: ollama         # ollama | openai
+  model: llama3            # used if provider=ollama
+  # model: gpt-4o-mini     # used if provider=openai
+  temperature: 0.2
+
+embeddings:
+  model_name: sentence-transformers/all-MiniLM-L6-v2
+  device: cpu
+
+retrieval:
+  chunk_size: 800
+  chunk_overlap: 120
+  top_k: 5
+  use_rerank: false

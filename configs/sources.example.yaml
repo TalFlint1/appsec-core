@@ -1,0 +1,21 @@
+# Pick one or more connectors and list sources.
+web:
+  allowed_domains:
+    - owasp.org
+  seed_urls:
+    # OWASP Top 10 (Web) landing page + details pages
+    - https://owasp.org/www-project-top-ten/
+    # (optional) OWASP API Security Top 10
+    - https://owasp.org/www-project-api-security/
+  max_pages: 100
+  rate_limit_seconds: 1
+  respect_robots_txt: true
+
+files:
+  include_globs:
+    - "docs/**/*.md"
+    - "docs/**/*.txt"
+
+pdf:
+  paths:
+    - "docs/pdfs/*.pdf"

@@ -1,0 +1,13 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+.env
+# data
+data/
+# faiss or index artifacts
+*.faiss
+*.npy
+*.pkl
+# notebooks
+.ipynb_checkpoints/

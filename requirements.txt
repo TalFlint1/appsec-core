@@ -1,0 +1,10 @@
+requests
+pyyaml
+beautifulsoup4
+lxml
+trafilatura
+tqdm
+sentence-transformers
+faiss-cpu
+numpy
+rich
