@@ -5,10 +5,16 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from .prompts import build_prompt, SYSTEM
 from ..index.faiss_store import FaissStore
+import re
 
 def load_yaml(path): 
     with open(path, "r", encoding="utf-8") as f: 
         return yaml.safe_load(f)
+
+def _is_locale_url(url: str) -> bool:
+    # Matches /Top10/fr/... /Top10/de/... /Top10/ja/... etc.
+    # Add common language codes + pt-br explicitly.
+    return bool(re.search(r"/Top10/(?:[a-z]{2}|pt-br|zh|ja|ko)/", url, re.IGNORECASE))
 
 class RAGPipeline:
     def __init__(self, models_cfg="configs/models.yaml", index_dir="data/index"):
@@ -61,9 +67,24 @@ class RAGPipeline:
         q_emb = self._embed_query(question)
         hits = self.store.search(q_emb, top_k=self.top_k)
         passages = [h[1] for h in hits]
+
+        # Prefer English pages first, then keep unique URLs (stable order)
+        passages.sort(key=lambda p: (_is_locale_url(p["url"]), ), reverse=False)
+        seen, dedup = set(), []
+        for p in passages:
+            if p["url"] in seen: 
+                continue
+            seen.add(p["url"]); dedup.append(p)
+        passages = dedup
+
         prompt = build_prompt(question, passages)
         answer = self._call_llm(prompt)
-        # Build a clean Sources footer from passages
+
+        # Build clean Sources footer
         sources = [p["url"] for p in passages]
-        footer = "Sources:\n" + "\n".join([f"[{i+1}] {u}" for i,u in enumerate(sources)])
-        return answer if answer.strip().endswith("Sources:") else f"{answer}\n\n{footer}"
+        footer = "Sources:\n" + "\n".join(f"[{i+1}] {u}" for i, u in enumerate(sources))
+
+        # Only append if the model didn't already add one (paranoid check)
+        if not re.search(r"(?im)^\s*Sources?\s*:", answer):
+            answer = f"{answer}\n\n{footer}"
+        return answer
