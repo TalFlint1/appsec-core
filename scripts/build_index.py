@@ -17,7 +17,12 @@ def main(raw_jsonl, index_dir, models_cfg):
     all_chunks = []
     for r in tqdm(recs, desc="chunking"):
         all_chunks.extend(chunk_record(r, cfg["retrieval"]["chunk_size"], cfg["retrieval"]["chunk_overlap"]))
-    embs, meta = embed_chunks(all_chunks, cfg["embeddings"]["model_name"])
+    # Pass through the configured device (e.g. "cuda" on Colab) when embedding.
+    embs, meta = embed_chunks(
+        all_chunks,
+        cfg["embeddings"]["model_name"],
+        device=cfg["embeddings"].get("device", "cpu"),
+    )
     store = FaissStore(Path(index_dir)/"index.faiss", Path(index_dir)/"meta.jsonl")
     store.build(embs, meta)
     store.save()

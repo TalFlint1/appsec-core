@@ -16,8 +16,12 @@ class RAGPipeline:
         self.index_dir = Path(index_dir)
         self.store = FaissStore(self.index_dir/"index.faiss", self.index_dir/"meta.jsonl")
         self.store.load()
-        emb_model_name = self.cfg["embeddings"]["model_name"]
-        self.embedder = SentenceTransformer(emb_model_name)
+        emb_model_name = self.cfg["embeddings"]["model_name"]            
+        # Initialise the embedding model on the configured device. Without
+        # specifying device, SentenceTransformer defaults to CPU even on GPU
+        # systems such as Colab.
+        emb_device = self.cfg["embeddings"].get("device", "cpu")
+        self.embedder = SentenceTransformer(emb_model_name, device=emb_device)
         self.top_k = int(self.cfg["retrieval"].get("top_k", 5))
         self.llm_provider = self.cfg["llm"]["provider"]
         self.llm_model = self.cfg["llm"]["model"]

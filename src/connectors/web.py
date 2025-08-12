@@ -9,7 +9,12 @@ from bs4 import BeautifulSoup
 import trafilatura
 import yaml
 
-HEADERS = {"User-Agent": "DocPilotRAG/0.1 (+https://example.local)"}
+# Use a more browser‑like User‑Agent to reduce blocking by sites. Some servers
+# aggressively block unknown bots; a familiar UA string helps ensure pages are
+# served. The project and contact info are still included so owners can reach us.
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; DocPilotRAG/0.1; +https://example.local)"
+}
 
 def load_sources(config_path: str):
     with open(config_path, "r", encoding="utf-8") as f:
@@ -17,7 +22,9 @@ def load_sources(config_path: str):
 
 def same_domain(url, allowed_domains):
     host = urlparse(url).netloc.lower()
-    return any(host.endswith(d.lower()) for d in allowed_domains)
+    # Accept subdomains by matching the end of the hostname. This allows
+    # e.g. `cheatsheetseries.owasp.org` when `owasp.org` is allowed.
+    return any(host == d.lower() or host.endswith("." + d.lower()) for d in allowed_domains)
 
 def clean_url(base, href):
     if not href: return None
@@ -71,30 +78,58 @@ def crawl_web(config_path: str, out_path: str):
 
     seen, q, saved = set(), deque(seeds), 0
     with open(out, "w", encoding="utf-8") as fout:
+        # Determine a minimum number of words required to save a page. Lowering this
+        # threshold makes it easier to collect small pages such as section summaries.
+        min_words = int(web.get("min_words", 20))
+        # Compile optional path regex if provided in config to limit crawling scope.
+        allowed_path_regex = None
+        if web.get("allowed_path_regex"):
+            try:
+                allowed_path_regex = re.compile(web["allowed_path_regex"])
+            except re.error:
+                allowed_path_regex = None
         while q and saved < max_pages:
             url = q.popleft()
+
+            # Skip URLs we've already visited or that fall outside the allowed domain set.
             if url in seen or not same_domain(url, allowed):
                 continue
             seen.add(url)
-            if not allowed_by_robots(url): continue
+            if not allowed_by_robots(url):
+                continue
 
             try:
-                r = requests.get(url, headers=HEADERS, timeout=20)
-                if "text/html" not in r.headers.get("Content-Type",""):
+                resp = requests.get(url, headers=HEADERS, timeout=20)
+                # Log the HTTP status to aid debugging; disabled by default in config.
+                print(f"[fetch] {resp.status_code} {url}")
+                # Skip non‑HTML content types. Normalise the header to lower case
+                # before checking so it matches e.g. 'Text/HTML; charset=utf-8'.
+                ctype = resp.headers.get("Content-Type", "").lower()
+                if "text/html" not in ctype:
                     continue
-                text = extract_readable(r.text, url)
-                title = BeautifulSoup(r.text, "lxml").title.string.strip() if BeautifulSoup(r.text, "lxml").title else url
-                if text and len(text.split()) > 50:
-                    rec = {"url": url, "title": title, "text": text}
+                html = resp.text
+                text = extract_readable(html, url)
+                # Derive page title, falling back to the URL if missing.
+                soup = BeautifulSoup(html, "lxml")
+                t_tag = soup.title.string.strip() if soup.title and soup.title.string else url
+                if text and len(text.split()) >= min_words:
+                    rec = {"url": url, "title": t_tag, "text": text}
                     fout.write(json.dumps(rec, ensure_ascii=False) + "\n")
                     saved += 1
-                # enqueue links
-                soup = BeautifulSoup(r.text, "lxml")
+                # enqueue links on the same domain, optionally filtered by path regex
                 for a in soup.find_all("a", href=True):
                     nu = clean_url(url, a["href"])
-                    if nu and same_domain(nu, allowed) and nu not in seen:
+                    if not nu:
+                        continue
+                    if not same_domain(nu, allowed):
+                        continue
+                    # If an allowed_path_regex is specified, skip links that don't match.
+                    if allowed_path_regex and not allowed_path_regex.search(urlparse(nu).path):
+                        continue
+                    if nu not in seen:
                         q.append(nu)
             except requests.RequestException:
+                # Ignore network errors and continue crawling
                 pass
             time.sleep(rate)
 

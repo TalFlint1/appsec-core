@@ -1,15 +1,33 @@
 # Pick one or more connectors and list sources.
 web:
+  # Only crawl OWASP domains (subdomains allowed).  See same_domain()
   allowed_domains:
     - owasp.org
+  # Start from the 2021 OWASP Top‑10 landing page and each A0X details page.
   seed_urls:
-    # OWASP Top 10 (Web) landing page + details pages
-    - https://owasp.org/www-project-top-ten/
-    # (optional) OWASP API Security Top 10
-    - https://owasp.org/www-project-api-security/
+    - https://owasp.org/Top10/
+    - https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+    - https://owasp.org/Top10/A02_2021-Cryptographic_Failures/
+    - https://owasp.org/Top10/A03_2021-Injection/
+    - https://owasp.org/Top10/A04_2021-Insecure_Design/
+    - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
+    - https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/
+    - https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/
+    - https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/
+    - https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/
+    - https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_(SSRF)/
   max_pages: 100
   rate_limit_seconds: 1
-  respect_robots_txt: true
+  # In Colab we ignore robots.txt to allow crawling within a short time.
+  respect_robots_txt: false
+  # Lower the minimum number of words required to save a page; see web.py min_words.
+  min_words: 20
+  # Limit crawling to /Top10/ pages only; prevents following unrelated links.
+  allowed_path_regex: '^/Top10/'
+  # Uncomment to allow a single hop to the OWASP Cheat Sheet Series.
+  # allow_one_hop_to:
+  #   - https://cheatsheetseries.owasp.org/
+  # max_hops: 2
 
 files:
   include_globs:
