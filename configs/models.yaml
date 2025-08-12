@@ -1,7 +1,8 @@
 llm:
-  provider: ollama         # ollama | openai
-  model: llama3            # used if provider=ollama
-  # model: gpt-4o-mini     # used if provider=openai
+  # provider: ollama         # ollama | openai
+  # model: llama3            # used if provider=ollama
+  provider: openai    # openai | ollama
+  model: gpt-4o-mini     # used if provider=openai
   temperature: 0.2
 
 embeddings:

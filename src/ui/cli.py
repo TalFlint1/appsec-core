@@ -1,4 +1,6 @@
 # src/ui/cli.py
+from dotenv import load_dotenv; load_dotenv()
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt

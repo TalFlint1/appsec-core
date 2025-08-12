@@ -29,6 +29,7 @@ class RAGPipeline:
 
     def _call_llm(self, prompt: str) -> str:
         if self.llm_provider == "ollama":
+            import requests
             resp = requests.post(
                 "http://localhost:11434/api/generate",
                 json={"model": self.llm_model, "prompt": f"{SYSTEM}\n\n{prompt}", "stream": False, "options": {"temperature": self.temperature}},
@@ -36,8 +37,21 @@ class RAGPipeline:
             )
             resp.raise_for_status()
             return resp.json().get("response","").strip()
+
+        elif self.llm_provider == "openai":
+            from openai import OpenAI
+            import os
+            # Expect OPENAI_API_KEY in env (no code changes needed for keys)
+            client = OpenAI()
+            chat = client.chat.completions.create(
+                model=self.llm_model,
+                messages=[{"role":"system","content": SYSTEM},{"role":"user","content": prompt}],
+                temperature=self.temperature,
+            )
+            return chat.choices[0].message.content.strip()
+
         else:
-            raise NotImplementedError("Only ollama implemented for now")
+            raise ValueError(f"Unknown llm provider: {self.llm_provider}")
 
     def answer(self, question: str):
         q_emb = self._embed_query(question)

@@ -8,3 +8,5 @@ sentence-transformers
 faiss-cpu
 numpy
 rich
+openai>=1.0.0
+python-dotenv
