@@ -37,7 +37,7 @@ def extract_readable(html, url):
     # prefer trafilatura; fallback to simple bs4 text
     try:
         downloaded = trafilatura.extract(html, include_comments=False, include_tables=False, url=url)
-        if downloaded and len(downloaded.split()) > 80:
+        if downloaded and len(downloaded.split()) > 50:
             return downloaded
     except Exception:
         pass
@@ -88,6 +88,13 @@ def crawl_web(config_path: str, out_path: str):
                 allowed_path_regex = re.compile(web["allowed_path_regex"])
             except re.error:
                 allowed_path_regex = None
+        # Compile optional disallow regex to exclude paths (e.g., non-English locales)
+        disallow_path_regex = None
+        if web.get("disallow_path_regex"):
+            try:
+                disallow_path_regex = re.compile(web["disallow_path_regex"])
+            except re.error:
+                disallow_path_regex = None
         while q and saved < max_pages:
             url = q.popleft()
 
@@ -97,7 +104,15 @@ def crawl_web(config_path: str, out_path: str):
             seen.add(url)
             if not allowed_by_robots(url):
                 continue
-
+            
+            # Path-level allow/disallow checks for the current URL
+            path_cur = urlparse(url).path
+            if allowed_path_regex and not allowed_path_regex.search(path_cur):
+                # allow the seed/landing page even if it doesn't match; otherwise skip
+                if url not in seeds:
+                    continue
+            if disallow_path_regex and disallow_path_regex.search(path_cur):
+                continue
             try:
                 resp = requests.get(url, headers=HEADERS, timeout=20)
                 # Log the HTTP status to aid debugging; disabled by default in config.
@@ -116,18 +131,20 @@ def crawl_web(config_path: str, out_path: str):
                     rec = {"url": url, "title": t_tag, "text": text}
                     fout.write(json.dumps(rec, ensure_ascii=False) + "\n")
                     saved += 1
-                # enqueue links on the same domain, optionally filtered by path regex
+                # enqueue links on the same domain, filtered by path allow/disallow
                 for a in soup.find_all("a", href=True):
                     nu = clean_url(url, a["href"])
-                    if not nu:
+                    if not nu or nu in seen:
                         continue
                     if not same_domain(nu, allowed):
                         continue
-                    # If an allowed_path_regex is specified, skip links that don't match.
-                    if allowed_path_regex and not allowed_path_regex.search(urlparse(nu).path):
+                    path_next = urlparse(nu).path
+                    if allowed_path_regex and not allowed_path_regex.search(path_next):
                         continue
-                    if nu not in seen:
-                        q.append(nu)
+                    if disallow_path_regex and disallow_path_regex.search(path_next):
+                        continue
+                    q.append(nu)
+
             except requests.RequestException:
                 # Ignore network errors and continue crawling
                 pass
