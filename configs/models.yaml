@@ -12,5 +12,8 @@ embeddings:
 retrieval:
   chunk_size: 800
   chunk_overlap: 120
-  top_k: 5
+  top_k: 5              # chunks we feed to the LLM
   use_rerank: false
+  citations_k: 3        # MAX number of URLs to show
+  max_chunks_per_url: 2 # diversify context; don’t take all chunks from one page
+  candidate_multiplier: 3  # retrieve this many * top_k from FAISS, then filter
