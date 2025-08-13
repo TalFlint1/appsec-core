@@ -16,7 +16,7 @@ web:
     # - https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/
     # - https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/
     # - https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_(SSRF)/
-  max_pages: 100
+  max_pages: 200
   rate_limit_seconds: 1
   # In Colab we ignore robots.txt to allow crawling within a short time.
   respect_robots_txt: false
@@ -30,6 +30,15 @@ web:
   # allow_one_hop_to:
   #   - https://cheatsheetseries.owasp.org/
   # max_hops: 2
+
+  # NEW: generic external expansion (no domain allowlist)
+  max_external_hops: 2                # one hop from any seed (A0X pages are seeds)
+  external_require_https: true        # only https externals
+  external_from_sections_regex: '(?i)references|further reading|cheat|prevention|mitigation'
+
+  # Optional safety rails (0 disables the cap)
+  external_max_pages_total: 30        # total number of external pages to fetch (set 0 to disable)
+  external_per_domain_cap: 0          # cap per domain (0 = unlimited)
 
 files:
   include_globs:
