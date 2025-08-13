@@ -22,9 +22,10 @@ web:
   respect_robots_txt: false
   # Lower the minimum number of words required to save a page; see web.py min_words.
   min_words: 20
-  # Limit crawling to /Top10/ pages only; prevents following unrelated links.
-  allowed_path_regex: '^/Top10/'
-  disallow_path_regex: '/Top10/(?:fr|de|it|ja|es|pt-br|ru|zh|ko)/'
+  # Only the Top10 landing page and Axx_2021-* detail pages:
+  allowed_path_regex: '^/Top10/(?:$|A\d{2}_\d{4}-)'
+  # Disallow any locale prefix like /Top10/fr/, /Top10/pt-BR/, /Top10/zh-Hant/
+  disallow_path_regex: '^/Top10/[A-Za-z]{2}(?:-[A-Za-z]{2,})?/'
   # Uncomment to allow a single hop to the OWASP Cheat Sheet Series.
   # allow_one_hop_to:
   #   - https://cheatsheetseries.owasp.org/

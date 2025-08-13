@@ -85,14 +85,14 @@ def crawl_web(config_path: str, out_path: str):
         allowed_path_regex = None
         if web.get("allowed_path_regex"):
             try:
-                allowed_path_regex = re.compile(web["allowed_path_regex"])
+                allowed_path_regex = re.compile(web["allowed_path_regex"], re.IGNORECASE)
             except re.error:
                 allowed_path_regex = None
         # Compile optional disallow regex to exclude paths (e.g., non-English locales)
         disallow_path_regex = None
         if web.get("disallow_path_regex"):
             try:
-                disallow_path_regex = re.compile(web["disallow_path_regex"])
+                disallow_path_regex = re.compile(web["disallow_path_regex"], re.IGNORECASE)
             except re.error:
                 disallow_path_regex = None
         while q and saved < max_pages:
