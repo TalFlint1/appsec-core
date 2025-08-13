@@ -8,30 +8,26 @@ from ..index.faiss_store import FaissStore
 import re
 from collections import defaultdict
 
-def _diversify_chunks(hits, k, max_per_url):
-    """
-    hits: list of (score_or_dist, chunk) ordered best->worst.
-    Returns up to k chunks with at most max_per_url per URL.
-    """
-    out, counts = [], defaultdict(int)
-    for _score, ch in hits:
-        url = ch.get("url", "")
-        if counts[url] >= max_per_url:
-            continue
-        out.append(ch)
-        counts[url] += 1
-        if len(out) >= k:
-            break
-    return out
-
 def _unique_urls_in_order(chunks):
-    """Return URLs in the order they appear, no duplicates."""
     seen, out = set(), []
     for ch in chunks:
         u = ch.get("url", "")
         if u and u not in seen:
             seen.add(u)
             out.append(u)
+    return out
+
+def _diversify_chunks(hits, k, max_per_url):
+    """hits: list of (score, chunk) best->worst; keep at most max_per_url per URL."""
+    out, counts = [], defaultdict(int)
+    for _score, ch in hits:
+        url = ch.get("url","")
+        if counts[url] >= max_per_url:
+            continue
+        out.append(ch)
+        counts[url] += 1
+        if len(out) >= k:
+            break
     return out
 
 def load_yaml(path): 
@@ -90,30 +86,61 @@ class RAGPipeline:
         else:
             raise ValueError(f"Unknown llm provider: {self.llm_provider}")
 
+    # def answer(self, question: str):
+    #     # 1) embed query
+    #     q_emb = self._embed_query(question)
+
+    #     # 2) read knobs
+    #     top_k = int(self.cfg["retrieval"].get("top_k", 5))
+    #     cand_mult = int(self.cfg["retrieval"].get("candidate_multiplier", 3))
+    #     max_per_url = int(self.cfg["retrieval"].get("max_chunks_per_url", 2))
+    #     citations_k = int(self.cfg["retrieval"].get("citations_k", 3))
+
+    #     # 3) retrieve more candidates than we’ll use, to allow diversification
+    #     raw_hits = self.store.search(q_emb, top_k=top_k * cand_mult)
+
+    #     # 4) diversify context so it isn’t all from one URL
+    #     context_chunks = _diversify_chunks(raw_hits, k=top_k, max_per_url=max_per_url)
+
+    #     # 5) build prompt only from those chunks and ask the LLM
+    #     prompt = build_prompt(question, context_chunks)
+    #     answer = self._call_llm(prompt)
+
+    #     # 6) citations come ONLY from the exact chunks we used (max citations_k)
+    #     cite_urls = _unique_urls_in_order(context_chunks)[:citations_k]
+
+    #     # 7) append a Sources footer iff we have any
+    #     if cite_urls and not re.search(r"(?im)^\s*Sources?\s*:", answer):
+    #         footer = "Sources:\n" + "\n".join(f"[{i+1}] {u}" for i, u in enumerate(cite_urls))
+    #         answer = f"{answer}\n\n{footer}"
+
+    #     return answer
+    
+    #
     def answer(self, question: str):
-        # 1) embed query
+        # 1) embed the query
         q_emb = self._embed_query(question)
 
-        # 2) read knobs
+        # 2) knobs from config
         top_k = int(self.cfg["retrieval"].get("top_k", 5))
         cand_mult = int(self.cfg["retrieval"].get("candidate_multiplier", 3))
         max_per_url = int(self.cfg["retrieval"].get("max_chunks_per_url", 2))
         citations_k = int(self.cfg["retrieval"].get("citations_k", 3))
 
-        # 3) retrieve more candidates than we’ll use, to allow diversification
+        # 3) retrieve more candidates than we will use
         raw_hits = self.store.search(q_emb, top_k=top_k * cand_mult)
 
-        # 4) diversify context so it isn’t all from one URL
+        # 4) diversify context so it isn't all from one URL
         context_chunks = _diversify_chunks(raw_hits, k=top_k, max_per_url=max_per_url)
 
-        # 5) build prompt only from those chunks and ask the LLM
+        # 5) build the prompt ONLY from those chunks and call the LLM
         prompt = build_prompt(question, context_chunks)
         answer = self._call_llm(prompt)
 
-        # 6) citations come ONLY from the exact chunks we used (max citations_k)
+        # 6) citations come ONLY from URLs of chunks we actually used (max citations_k)
         cite_urls = _unique_urls_in_order(context_chunks)[:citations_k]
 
-        # 7) append a Sources footer iff we have any
+        # 7) append footer only if there are any citations and the model didn’t add its own
         if cite_urls and not re.search(r"(?im)^\s*Sources?\s*:", answer):
             footer = "Sources:\n" + "\n".join(f"[{i+1}] {u}" for i, u in enumerate(cite_urls))
             answer = f"{answer}\n\n{footer}"
