@@ -34,7 +34,7 @@ web:
   # NEW: generic external expansion (no domain allowlist)
   max_external_hops: 2                # one hop from any seed (A0X pages are seeds)
   external_require_https: true        # only https externals
-  external_from_sections_regex: '(?i)references|further reading|cheat|prevention|mitigation'
+  external_from_sections_regex: 'references'
 
   # Optional safety rails (0 disables the cap)
   external_max_pages_total: 30        # total number of external pages to fetch (set 0 to disable)
