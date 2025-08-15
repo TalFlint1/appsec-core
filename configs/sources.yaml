@@ -21,7 +21,7 @@ web:
   # In Colab we ignore robots.txt to allow crawling within a short time.
   respect_robots_txt: false
   # Lower the minimum number of words required to save a page; see web.py min_words.
-  min_words: 20
+  min_words: 10
   # Only the Top10 landing page and Axx_2021-* detail pages:
   allowed_path_regex: '^/Top10/(?:$|A\d{2}_\d{4}-)'
   # Disallow any locale prefix like /Top10/fr/, /Top10/pt-BR/, /Top10/zh-Hant/
