@@ -42,7 +42,11 @@ def canonicalize(url: str) -> str:
     path = unquote(u.path)
     path = re.sub(r"/index\.html?$", "/", path)
     path = re.sub(r"/{2,}", "/", path)
-    if not path.endswith("/"):
+    # Only append a trailing slash for directory-like paths.  If the path appears to
+    # end with a file extension (e.g. .html, .pdf), don't add a slash because many
+    # sites treat that as a different URL (often 404).  See issue where
+    # cheat‑sheet links were canonicalized to `.html/` and returned 404.
+    if not path.endswith("/") and not re.search(r"\.[A-Za-z0-9]{1,5}$", path):
         path = path + "/"
     return f"{u.scheme}://{u.netloc}{path}{('?' + u.query) if u.query else ''}"
 
@@ -246,7 +250,16 @@ def crawl_web(config_path: str, out_path: str):
 
             time.sleep(rate)
 
-    print(f"[crawl] saved {saved} pages to {out}")
+        print(f"[crawl] saved {saved} pages to {out}")
+
+        # Print crawl statistics: internal vs external saved and top domains
+        internal_saved = saved - external_pages_total
+        print(f"[stats] internal={internal_saved}, external={external_pages_total}, total={saved}")
+        if per_domain_counts:
+            # show top 10 domains for external pages
+            top = sorted(per_domain_counts.items(), key=lambda item: item[1], reverse=True)[:10]
+            summary = ", ".join([f"{d}: {c}" for d, c in top])
+            print(f"[stats] top external domains: {summary}")
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
