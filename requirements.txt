@@ -10,3 +10,4 @@ numpy
 rich
 openai>=1.0.0
 python-dotenv
+streamlit>=1.36
