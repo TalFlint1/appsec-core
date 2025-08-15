@@ -37,7 +37,7 @@ web:
   external_from_sections_regex: 'references'
 
   # Optional safety rails (0 disables the cap)
-  external_max_pages_total: 30        # total number of external pages to fetch (set 0 to disable)
+  external_max_pages_total: 0        # total number of external pages to fetch (set 0 to disable)
   external_per_domain_cap: 0          # cap per domain (0 = unlimited)
 
 files:
