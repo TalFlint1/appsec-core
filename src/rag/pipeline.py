@@ -5,6 +5,7 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from .prompts import build_prompt, SYSTEM, GENERAL_SYSTEM
 from ..index.faiss_store import FaissStore
+from ..memory.store import MemoryStore
 import re
 from collections import defaultdict
 
@@ -12,7 +13,9 @@ def _unique_urls_in_order(chunks):
     seen, out = set(), []
     for ch in chunks:
         u = ch.get("url", "")
-        if u and u not in seen:
+        if not u or not u.startswith("http"):
+            continue
+        if u not in seen:
             seen.add(u); out.append(u)
     return out
 
@@ -43,6 +46,11 @@ class RAGPipeline:
         emb_model_name = self.cfg["embeddings"]["model_name"]
         emb_device = self.cfg["embeddings"].get("device", "cpu")
         self.embedder = SentenceTransformer(emb_model_name, device=emb_device)
+
+        self.mem = MemoryStore(embedder=self.embedder)
+        mem_cfg = (self.cfg.get("retrieval") or {})
+        self.mem_enabled = bool(mem_cfg.get("mem_enabled", True))
+        self.mem_k = int(mem_cfg.get("mem_k", 3))
 
         # LLM
         self.llm_provider = self.cfg["llm"]["provider"]
@@ -100,6 +108,15 @@ class RAGPipeline:
 
         # 2) diversify selected context
         context_chunks = _diversify_chunks(raw_hits, k=self.top_k, max_per_url=self.max_chunks_per_url)
+
+        # 2.5) (NEW) retrieve relevant memories; prepend as pseudo-chunk(s)
+        if self.mem_enabled:
+            mem_snips = self.mem.search(question, top_k=self.mem_k)
+            if mem_snips:
+                mem_text = "• " + "\n• ".join(mem_snips)
+                mem_chunk = {"title": "User memory", "url": "", "text": mem_text}
+                # Prepend so it gets seen by the LLM but won’t be cited
+                context_chunks = [mem_chunk] + context_chunks   
 
         # 3) compute retrieval confidence from the top score if it looks like a similarity
         top_score = None

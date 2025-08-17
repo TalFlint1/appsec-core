@@ -18,7 +18,10 @@ retrieval:
   max_chunks_per_url: 2 # diversify context; don’t take all chunks from one page
   candidate_multiplier: 3  # retrieve this many * top_k from FAISS, then filter
 
-# --- minimal hybrid gating ---
+  # --- minimal hybrid gating ---
   min_hits_for_grounded: 2   # need at least this many chunks selected
   score_threshold: 0.35      # require top similarity >= this to ground (set 0.0 to disable)
   open_domain_fallback: true # if gating fails, answer with general LLM (no citations)
+
+  mem_enabled: true
+  mem_k: 3      # how many memory snippets to include in the prompt

@@ -52,6 +52,43 @@ with st.sidebar:
     show_sources = st.checkbox("Show sources", value=True)
     max_sources = st.slider("Max sources", min_value=1, max_value=5, value=3)
 
+    # ------- Memory controls -------
+    st.divider()
+    st.header("Memory")
+    mem_enabled_default = getattr(pipe, "mem_enabled", True)
+    mem_enabled_ui = st.checkbox("Enable memory", value=mem_enabled_default)
+    pipe.mem_enabled = mem_enabled_ui  # reflect UI state into pipeline
+
+    new_mem = st.text_input("Add a memory (e.g., “I live in Tel Aviv”).", key="mem_add")
+    if st.button("Save memory"):
+        if new_mem.strip():
+            try:
+                pipe.mem.add(new_mem.strip())
+                st.success("Saved to memory.")
+            except Exception as e:
+                st.error(f"Could not save memory: {e}")
+        else:
+            st.warning("Write something first.")
+
+    if st.button("Show memory items"):
+        try:
+            items = pipe.mem.all()
+            if not items:
+                st.info("No memory yet.")
+            else:
+                for it in items[-20:]:
+                    st.write("•", it["text"])
+        except Exception as e:
+            st.error(f"Could not read memory: {e}")
+
+    if st.button("Clear memory"):
+        try:
+            pipe.mem.clear()
+            st.warning("Memory cleared.")
+        except Exception as e:
+            st.error(f"Could not clear memory: {e}")
+    # ------- end Memory controls -------
+
 st.title("DocPilot RAG")
 st.caption("Ask anything about the OWASP Top-10 and related references.")
 
@@ -65,6 +102,21 @@ for role, msg in st.session_state.chat:
 
 prompt = st.chat_input("Type your question…")
 if prompt:
+    # ---- Chat command: /remember <text> ----
+    low = prompt.strip().lower()
+    if low.startswith("/remember "):
+        fact = prompt.strip()[10:].strip()
+        if fact:
+            try:
+                pipe.mem.add(fact)
+                st.session_state.chat.append(("assistant", "Saved to memory."))
+            except Exception as e:
+                st.session_state.chat.append(("assistant", f"Could not save memory: {e}"))
+        else:
+            st.session_state.chat.append(("assistant", "Nothing to remember."))
+        st.stop()
+    # ---- end command ----
+
     # Render user message immediately
     st.session_state.chat.append(("user", prompt))
     with st.chat_message("user"):
