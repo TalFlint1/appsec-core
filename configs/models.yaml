@@ -17,3 +17,11 @@ retrieval:
   citations_k: 3        # MAX number of URLs to show
   max_chunks_per_url: 2 # diversify context; don’t take all chunks from one page
   candidate_multiplier: 3  # retrieve this many * top_k from FAISS, then filter
+
+  # --- fallback behavior ---
+  min_hits_for_grounded: 1   # if fewer used chunks than this, treat as "no context"
+  score_threshold: 0.0       # 0.0 = disabled (use if your index returns usable scores)
+  open_domain_fallback: true # let the assistant answer generally if corpus is irrelevant
+  fallback_scope: "any"      # "any" | "tech" | "off"
+  date_time_aware: true      # answer simple date questions locally
+  timezone: "Asia/Jerusalem" # your default TZ

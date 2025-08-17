@@ -4,6 +4,12 @@ SYSTEM = """You are a security-savvy documentation assistant.
 Answer concisely based only on the provided context. 
 If the answer isn't in context, say you don't have enough information.
 Do NOT add a "Sources" section; it will be appended automatically."""
+
+GENERAL_SYSTEM = """You are a helpful assistant.
+- For general questions, answer clearly and concisely.
+- For security/OWASP topics, be practical and precise.
+- Do not fabricate citations. Only include a 'Sources:' section if context is provided."""
+
 USER_TEMPLATE = """Question: {question}
 
 Context:
