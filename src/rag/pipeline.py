@@ -69,6 +69,21 @@ class RAGPipeline:
         self.score_threshold       = float(r.get("score_threshold", 0.35))
         self.open_domain_fallback  = bool(r.get("open_domain_fallback", True))
 
+    # ---- memory helpers ----
+    def _memory_snips(self, question: str):
+        if not getattr(self, "mem_enabled", True):
+            return []
+        try:
+            return self.mem.search(question, top_k=getattr(self, "mem_k", 3))
+        except Exception:
+            return []
+
+    def _format_mem_block(self, snips):
+        if not snips:
+            return ""
+        bullets = "\n".join(f"- {s}" for s in snips)
+        return f"Relevant user memory (use only if helpful):\n{bullets}\n"
+    
     def _embed_query(self, q: str) -> np.ndarray:
         e = self.embedder.encode([q], normalize_embeddings=True)
         return np.asarray(e, dtype="float32")
@@ -109,14 +124,15 @@ class RAGPipeline:
         # 2) diversify selected context
         context_chunks = _diversify_chunks(raw_hits, k=self.top_k, max_per_url=self.max_chunks_per_url)
 
-        # 2.5) (NEW) retrieve relevant memories; prepend as pseudo-chunk(s)
-        if self.mem_enabled:
-            mem_snips = self.mem.search(question, top_k=self.mem_k)
-            if mem_snips:
-                mem_text = "• " + "\n• ".join(mem_snips)
-                mem_chunk = {"title": "User memory", "url": "", "text": mem_text}
-                # Prepend so it gets seen by the LLM but won’t be cited
-                context_chunks = [mem_chunk] + context_chunks   
+        # ---- pull memory early ----
+        mem_snips = self._memory_snips(question)
+
+        # If we do a grounded answer, prepend a pseudo-chunk so LLM sees memory,
+        # but it won’t appear in citations (url = "")
+        if mem_snips:
+            mem_text = "• " + "\n• ".join(mem_snips)
+            mem_chunk = {"title": "User memory", "url": "", "text": mem_text}
+            context_chunks = [mem_chunk] + context_chunks
 
         # 3) compute retrieval confidence from the top score if it looks like a similarity
         top_score = None
@@ -134,7 +150,7 @@ class RAGPipeline:
             # Unknown scale (e.g., distances) → don't block on score
             return True
 
-        have_enough_hits = len(context_chunks) >= self.min_hits_for_grounded
+        have_enough_hits = len([c for c in context_chunks if c.get("url","")]) >= self.min_hits_for_grounded
         score_ok = _score_passes(top_score, self.score_threshold)
 
         if have_enough_hits and score_ok:
@@ -151,7 +167,10 @@ class RAGPipeline:
 
         # 5) fallback to general LLM (no citations)
         if self.open_domain_fallback:
-            return self._call_llm(question, system=GENERAL_SYSTEM)
+            # include memory as a short preface for the general LLM too
+            mem_block = self._format_mem_block(mem_snips)
+            general_prompt = (mem_block + f"User question: {question}").strip()
+            return self._call_llm(general_prompt, system=GENERAL_SYSTEM)
 
         # 6) strict mode (no fallback)
         return "I couldn’t find enough information in the indexed corpus to answer that."
