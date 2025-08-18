@@ -19,7 +19,7 @@ def load_pipe():
 
 pipe = load_pipe()
 
-# Sidebar: corpus snapshot
+# Sidebar: corpus + controls
 with st.sidebar:
     st.header("Corpus")
     crawl_path = ROOT / "data" / "raw" / "crawl.jsonl"
@@ -59,6 +59,13 @@ with st.sidebar:
     mem_enabled_ui = st.checkbox("Enable memory", value=mem_enabled_default)
     pipe.mem_enabled = mem_enabled_ui  # reflect UI state into pipeline
 
+    # Auto-capture toggle (LLM-based)
+    auto_capture = st.checkbox(
+        "Auto-capture from messages",
+        value=True,
+        help="Extract durable, non-sensitive facts via the LLM and store them."
+    )
+
     new_mem = st.text_input("Add a memory (e.g., “I live in Tel Aviv”).", key="mem_add")
     if st.button("Save memory"):
         if new_mem.strip():
@@ -87,6 +94,9 @@ with st.sidebar:
             st.warning("Memory cleared.")
         except Exception as e:
             st.error(f"Could not clear memory: {e}")
+
+    # Dev helper: show what memory would be retrieved for the CURRENT input (when provided)
+    show_mem_debug = st.checkbox("Show retrieved memory for current question (dev)", value=False)
     # ------- end Memory controls -------
 
 st.title("DocPilot RAG")
@@ -121,6 +131,28 @@ if prompt:
     st.session_state.chat.append(("user", prompt))
     with st.chat_message("user"):
         st.markdown(prompt)
+
+    # ---- NEW: auto-learn via MemoryManager (shared store with /remember) ----
+    try:
+        if getattr(pipe, "mem_enabled", True) and auto_capture:
+            recent = st.session_state.chat[-6:]  # last few turns, (role, msg)
+            saved = pipe.mem_manager.maybe_extract_and_store(prompt, recent_chat=recent, max_facts=3)
+            if saved:
+                st.sidebar.success("Saved memory: " + "; ".join(f"“{s.text}”" for s in saved))
+    except Exception as e:
+        st.sidebar.error(f"Memory extraction failed: {e}")
+    # ------------------------------------------------------------------------
+
+    # Optional: show what memory is retrieved for THIS prompt (debug)
+    if show_mem_debug and getattr(pipe, "mem_enabled", True):
+        try:
+            snips = pipe.mem_manager.retrieve(prompt, top_k=getattr(pipe, "mem_k", 3))
+            if snips:
+                st.sidebar.info("Retrieved memory:\n" + "\n".join("• " + s for s in snips))
+            else:
+                st.sidebar.info("Retrieved memory: (none)")
+        except Exception as e:
+            st.sidebar.error(f"Memory retrieve failed: {e}")
 
     # Build soft style hints for the LLM (no code changes needed)
     style_bits = []

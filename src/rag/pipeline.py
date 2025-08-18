@@ -1,13 +1,14 @@
 # src/rag/pipeline.py
-import yaml, requests
+import yaml, requests, re
 import numpy as np
 from pathlib import Path
+from collections import defaultdict
 from sentence_transformers import SentenceTransformer
+
 from .prompts import build_prompt, SYSTEM, GENERAL_SYSTEM
 from ..index.faiss_store import FaissStore
 from ..memory.store import MemoryStore
-import re
-from collections import defaultdict
+from ..memory.manager import MemoryManager   # <-- USE the manager
 
 def _unique_urls_in_order(chunks):
     seen, out = set(), []
@@ -43,47 +44,45 @@ class RAGPipeline:
         self.store = FaissStore(self.index_dir/"index.faiss", self.index_dir/"meta.jsonl")
         self.store.load()
 
+        # Embeddings
         emb_model_name = self.cfg["embeddings"]["model_name"]
         emb_device = self.cfg["embeddings"].get("device", "cpu")
         self.embedder = SentenceTransformer(emb_model_name, device=emb_device)
 
-        self.mem = MemoryStore(embedder=self.embedder)
-        mem_cfg = (self.cfg.get("retrieval") or {})
-        self.mem_enabled = bool(mem_cfg.get("mem_enabled", True))
-        self.mem_k = int(mem_cfg.get("mem_k", 3))
+        # Retrieval knobs
+        r = self.cfg.get("retrieval", {}) or {}
+        self.top_k                = int(r.get("top_k", 5))
+        self.candidate_multiplier = int(r.get("candidate_multiplier", 3))
+        self.max_chunks_per_url   = int(r.get("max_chunks_per_url", 2))
+        self.citations_k          = int(r.get("citations_k", 3))
+        self.min_hits_for_grounded= int(r.get("min_hits_for_grounded", 2))
+        self.score_threshold      = float(r.get("score_threshold", 0.35))
+        self.open_domain_fallback = bool(r.get("open_domain_fallback", True))
 
         # LLM
         self.llm_provider = self.cfg["llm"]["provider"]
         self.llm_model    = self.cfg["llm"]["model"]
         self.temperature  = float(self.cfg["llm"].get("temperature", 0.2))
 
-        # Retrieval knobs
-        r = self.cfg.get("retrieval", {})
-        self.top_k               = int(r.get("top_k", 5))
-        self.candidate_multiplier= int(r.get("candidate_multiplier", 3))
-        self.max_chunks_per_url  = int(r.get("max_chunks_per_url", 2))
-        self.citations_k         = int(r.get("citations_k", 3))
+        # ---- Memory: ONE shared store + manager (used by /remember and auto-capture)
+        self.mem_store   = MemoryStore(embedder=self.embedder)
+        self.mem         = self.mem_store          # alias so UI code `pipe.mem.add(...)` keeps working
+        self.mem_enabled = bool(r.get("mem_enabled", True))
+        self.mem_k       = int(r.get("mem_k", 3))
+        self.mem_manager = MemoryManager(
+            store=self.mem_store,
+            embedder=self.embedder,
+            llm_provider=self.llm_provider,
+            llm_model=self.llm_model,
+            temperature=0.0,
+        )
 
-        # Minimal hybrid gating
-        self.min_hits_for_grounded = int(r.get("min_hits_for_grounded", 2))
-        self.score_threshold       = float(r.get("score_threshold", 0.35))
-        self.open_domain_fallback  = bool(r.get("open_domain_fallback", True))
-
-    # ---- memory helpers ----
-    def _memory_snips(self, question: str):
-        if not getattr(self, "mem_enabled", True):
-            return []
-        try:
-            return self.mem.search(question, top_k=getattr(self, "mem_k", 3))
-        except Exception:
-            return []
-
+    # ---- helpers ----
     def _format_mem_block(self, snips):
-        if not snips:
-            return ""
+        if not snips: return ""
         bullets = "\n".join(f"- {s}" for s in snips)
-        return f"Relevant user memory (use only if helpful):\n{bullets}\n"
-    
+        return f"Known user facts (use only if helpful):\n{bullets}\n"
+
     def _embed_query(self, q: str) -> np.ndarray:
         e = self.embedder.encode([q], normalize_embeddings=True)
         return np.asarray(e, dtype="float32")
@@ -117,22 +116,15 @@ class RAGPipeline:
             raise ValueError(f"Unknown llm provider: {self.llm_provider}")
 
     def answer(self, question: str):
+        # 0) Retrieve relevant memories FIRST (non-cited)
+        mem_snips = self.mem_manager.retrieve(question, top_k=self.mem_k) if self.mem_enabled else []
+
         # 1) embed and retrieve more candidates than we'll use
         q_emb = self._embed_query(question)
         raw_hits = self.store.search(q_emb, top_k=self.top_k * self.candidate_multiplier)  # [(score, chunk), ...]
 
         # 2) diversify selected context
         context_chunks = _diversify_chunks(raw_hits, k=self.top_k, max_per_url=self.max_chunks_per_url)
-
-        # ---- pull memory early ----
-        mem_snips = self._memory_snips(question)
-
-        # If we do a grounded answer, prepend a pseudo-chunk so LLM sees memory,
-        # but it won’t appear in citations (url = "")
-        if mem_snips:
-            mem_text = "• " + "\n• ".join(mem_snips)
-            mem_chunk = {"title": "User memory", "url": "", "text": mem_text}
-            context_chunks = [mem_chunk] + context_chunks
 
         # 3) compute retrieval confidence from the top score if it looks like a similarity
         top_score = None
@@ -142,32 +134,30 @@ class RAGPipeline:
                 top_score = float(s0)
 
         def _score_passes(score, threshold):
-            # Only enforce threshold if score appears to be a cosine-like similarity in [0,1].
-            if score is None or threshold <= 0.0:
-                return True
-            if 0.0 <= score <= 1.0:
-                return score >= threshold
-            # Unknown scale (e.g., distances) → don't block on score
+            if score is None or threshold <= 0.0: return True
+            if 0.0 <= score <= 1.0: return score >= threshold
             return True
 
         have_enough_hits = len([c for c in context_chunks if c.get("url","")]) >= self.min_hits_for_grounded
         score_ok = _score_passes(top_score, self.score_threshold)
 
+        # 4) GROUNDED: prepend a pseudo memory chunk so LLM can personalize;
+        #              memory chunk has url="" so it won't be cited.
         if have_enough_hits and score_ok:
-            # 4) grounded answer from context
+            if mem_snips:
+                mem_chunk = {"title": "User memory", "url": "", "text": "• " + "\n• ".join(mem_snips)}
+                context_chunks = [mem_chunk] + context_chunks
             prompt = build_prompt(question, context_chunks)
             answer = self._call_llm(prompt, system=SYSTEM)
 
-            # citations ONLY from URLs we actually used
             cite_urls = _unique_urls_in_order(context_chunks)[: self.citations_k]
             if cite_urls and not re.search(r"(?im)^\s*Sources?\s*:", answer):
                 footer = "Sources:\n" + "\n".join(f"[{i+1}] {u}" for i, u in enumerate(cite_urls))
                 answer = f"{answer}\n\n{footer}"
             return answer
 
-        # 5) fallback to general LLM (no citations)
+        # 5) FALLBACK: prepend a memory preface to general LLM
         if self.open_domain_fallback:
-            # include memory as a short preface for the general LLM too
             mem_block = self._format_mem_block(mem_snips)
             general_prompt = (mem_block + f"User question: {question}").strip()
             return self._call_llm(general_prompt, system=GENERAL_SYSTEM)
