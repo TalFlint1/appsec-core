@@ -9,6 +9,7 @@ from .prompts import build_prompt, SYSTEM, GENERAL_SYSTEM
 from ..index.faiss_store import FaissStore
 from ..memory.store import MemoryStore
 from ..memory.manager import MemoryManager   # <-- USE the manager
+from ..utils.metrics import record_time
 
 def _unique_urls_in_order(chunks):
     seen, out = set(), []
@@ -78,6 +79,24 @@ class RAGPipeline:
         )
 
     # ---- helpers ----
+    @record_time("retrieval_ms")
+    def retrieve(self, question: str, k: int | None = None, diversify: bool | None = None):
+        """
+        Return the top-k chunks for a question using the same embeddings/index.
+        If diversify is False, just take the first k raw hits. If True (default),
+        use the pipeline's diversification caps.
+        """
+        k = k or self.top_k
+        if diversify is None:
+            diversify = True  # default aligns with your normal answer path
+        q_emb = self._embed_query(question)
+        raw_hits = self.store.search(q_emb, top_k=k * self.candidate_multiplier)  # [(score, chunk), ...]
+        if diversify:
+            chunks = _diversify_chunks(raw_hits, k=k, max_per_url=self.max_chunks_per_url)
+        else:
+            chunks = [ch for _s, ch in raw_hits][:k]
+        return chunks
+
     def _format_mem_block(self, snips):
         if not snips: return ""
         bullets = "\n".join(f"- {s}" for s in snips)
@@ -115,6 +134,7 @@ class RAGPipeline:
         else:
             raise ValueError(f"Unknown llm provider: {self.llm_provider}")
 
+    @record_time("end_to_end_ms")
     def answer(self, question: str):
         # 0) Retrieve relevant memories FIRST (non-cited)
         mem_snips = self.mem_manager.retrieve(question, top_k=self.mem_k) if self.mem_enabled else []
