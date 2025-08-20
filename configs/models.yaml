@@ -10,18 +10,26 @@ embeddings:
   device: cpu
 
 retrieval:
+  # chunking
   chunk_size: 800
   chunk_overlap: 120
-  top_k: 5              # chunks we feed to the LLM
-  use_rerank: false
-  citations_k: 3        # MAX number of URLs to show
-  max_chunks_per_url: 2 # diversify context; don’t take all chunks from one page
-  candidate_multiplier: 3  # retrieve this many * top_k from FAISS, then filter
 
-  # --- minimal hybrid gating ---
-  min_hits_for_grounded: 2   # need at least this many chunks selected
-  score_threshold: 0.35      # require top similarity >= this to ground (set 0.0 to disable)
-  open_domain_fallback: true # if gating fails, answer with general LLM (no citations)
+  # retrieval
+  top_k: 5
+  candidate_multiplier: 5
+  max_chunks_per_url: 2
+  citations_k: 3
 
+  # re-ranking
+  use_rerank: true
+  reranker_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+  reranker_top_n: 30
+
+  # hybrid “grounded vs fallback” gating
+  min_hits_for_grounded: 2
+  score_threshold: 0.35
+  open_domain_fallback: true
+
+  # memory
   mem_enabled: true
-  mem_k: 3      # how many memory snippets to include in the prompt
+  mem_k: 3
