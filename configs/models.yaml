@@ -18,7 +18,7 @@ retrieval:
   top_k: 5
   candidate_multiplier: 5
   max_chunks_per_url: 2
-  citations_k: 3
+  citations_k: 1
 
   # re-ranking
   use_rerank: true

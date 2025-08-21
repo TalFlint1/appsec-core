@@ -51,6 +51,81 @@ ACRONYM_MAP = {
     "ssti": "server-side template injection",
 }
 
+# ---------- Topic-aware citation scoring (soft preference) ----------
+PREFERRED_CITATION_DOMAINS = (
+    "owasp.org",
+    "cheatsheetseries.owasp.org",
+    "portswigger.net/web-security",  # prefer the learning pages over general blog
+)
+
+def _domain_rank(url: str) -> int:
+    """Smaller rank is better."""
+    for i, d in enumerate(PREFERRED_CITATION_DOMAINS):
+        if d in url:
+            return i
+    return len(PREFERRED_CITATION_DOMAINS)
+
+def _topic_overlap(question: str, ch: dict) -> int:
+    """
+    Lightweight overlap of question terms with title/URL (2pts) and body (1pt).
+    Softly favors pages whose title/URL/text contain the topic terms.
+    """
+    q = question.lower()
+    title_url = (ch.get("title", "") + " " + ch.get("url", "")).lower()
+    text = (ch.get("text", "") or "").lower()[:1200]
+
+    terms = set(t for t in re.findall(r"[a-z0-9\-]+", q) if len(t) > 2)
+
+    # expand common acronyms
+    for k, v in ACRONYM_MAP.items():
+        if k in terms:
+            terms.add(v)
+            terms.update(v.split())
+            terms.add(v.replace(" ", "-"))
+
+    score = 0
+    for t in terms:
+        if t in title_url:
+            score += 2
+        elif t in text:
+            score += 1
+    return score
+
+def _select_citations(question: str, used_chunks: list, raw_hits: list, k: int) -> list[str]:
+    """
+    Pick the top-k URLs by (topic overlap, domain pref, sim/rerank score).
+    Falls back to first-appearance order if no scores computed.
+    """
+    # map chunk id -> sim/rerank score for tie-breaks
+    sim_map = {}
+    for s, ch in raw_hits:
+        if isinstance(s, (int, float)):
+            sim_map[id(ch)] = float(s)
+
+    candidates = [ch for ch in used_chunks if ch.get("url", "").startswith("http")]
+    scored = []
+    for ch in candidates:
+        url = ch["url"]
+        tscore = _topic_overlap(question, ch)
+        dscore = -_domain_rank(url)  # higher is better after sort
+        sscore = sim_map.get(id(ch), 0.0)
+        scored.append(((tscore, dscore, sscore), url))
+
+    scored.sort(reverse=True)  # topic > domain > similarity
+    out, seen = [], set()
+    for _, url in scored:
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append(url)
+        if len(out) >= k:
+            break
+
+    if not out:
+        out = _unique_urls_in_order(candidates)[:k]
+    return out
+# -------------------------------------------------------------------
+
 class RAGPipeline:
     def __init__(self, models_cfg="configs/models.yaml", index_dir="data/index"):
         self.cfg = load_yaml(models_cfg)
@@ -68,7 +143,7 @@ class RAGPipeline:
         self.top_k                 = int(r.get("top_k", 5))
         self.candidate_multiplier  = int(r.get("candidate_multiplier", 3))
         self.max_chunks_per_url    = int(r.get("max_chunks_per_url", 2))
-        self.citations_k           = int(r.get("citations_k", 3))
+        self.citations_k           = int(r.get("citations_k", 1))  # default 1 now
         self.min_hits_for_grounded = int(r.get("min_hits_for_grounded", 2))
         self.score_threshold       = float(r.get("score_threshold", 0.35))
         self.open_domain_fallback  = bool(r.get("open_domain_fallback", True))
@@ -229,7 +304,11 @@ class RAGPipeline:
             prompt = build_prompt(question, context_chunks)
             answer = self._call_llm(prompt, system=SYSTEM)
 
-            cite_urls = _unique_urls_in_order(context_chunks)[: self.citations_k]
+            # --- NEW: topic-aware single-citation selection ---
+            num_cites = max(1, int(self.citations_k))
+            cite_urls = _select_citations(q_text, context_chunks, raw_hits, num_cites)
+            # ---------------------------------------------------
+
             if cite_urls and not re.search(r"(?im)^\s*Sources?\s*:", answer):
                 footer = "Sources:\n" + "\n".join(f"[{i+1}] {u}" for i, u in enumerate(cite_urls))
                 answer = f"{answer}\n\n{footer}"
