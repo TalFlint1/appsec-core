@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from src.rag.pipeline import RAGPipeline  # noqa
 
-st.set_page_config(page_title="DocPilot RAG", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="AppSec Core", page_icon="🤖", layout="wide")
 
 @st.cache_resource(show_spinner=True)
 def load_pipe():
@@ -99,7 +99,7 @@ with st.sidebar:
     show_mem_debug = st.checkbox("Show retrieved memory for current question (dev)", value=False)
     # ------- end Memory controls -------
 
-st.title("DocPilot RAG")
+st.title("AppSec Core — OWASP Top-10 Assistant")
 st.caption("Ask anything about the OWASP Top-10 and related references.")
 
 # Chat history (client-side only)
