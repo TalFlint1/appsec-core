@@ -1,12 +1,14 @@
 # src/rag/pipeline.py
+from __future__ import annotations
 import re
 import yaml
 import requests
 import numpy as np
 from pathlib import Path
 from collections import defaultdict
-from sentence_transformers import SentenceTransformer
-from sentence_transformers import CrossEncoder
+from typing import List, Tuple, Dict
+
+from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from .prompts import build_prompt, SYSTEM, GENERAL_SYSTEM
 from ..index.faiss_store import FaissStore
@@ -14,7 +16,8 @@ from ..memory.store import MemoryStore
 from ..memory.manager import MemoryManager
 from ..utils.metrics import record_time
 
-def _unique_urls_in_order(chunks):
+# ---------------- citation helpers (kept + extended) ----------------
+def _unique_urls_in_order(chunks: List[Dict]) -> List[str]:
     seen, out = set(), []
     for ch in chunks:
         u = ch.get("url", "")
@@ -25,7 +28,7 @@ def _unique_urls_in_order(chunks):
             out.append(u)
     return out
 
-def _diversify_chunks(hits, k, max_per_url):
+def _diversify_chunks(hits: List[Tuple[float, Dict]], k: int, max_per_url: int) -> List[Dict]:
     """hits: list of (score, chunk) best->worst; keep at most max_per_url per URL."""
     out, counts = [], defaultdict(int)
     for _score, ch in hits:
@@ -51,32 +54,25 @@ ACRONYM_MAP = {
     "ssti": "server-side template injection",
 }
 
-# ---------- Topic-aware citation scoring (soft preference) ----------
+# Preferred domains (soft)
 PREFERRED_CITATION_DOMAINS = (
     "owasp.org",
     "cheatsheetseries.owasp.org",
-    "portswigger.net/web-security",  # prefer the learning pages over general blog
+    "portswigger.net/web-security",
 )
 
 def _domain_rank(url: str) -> int:
-    """Smaller rank is better."""
     for i, d in enumerate(PREFERRED_CITATION_DOMAINS):
         if d in url:
             return i
     return len(PREFERRED_CITATION_DOMAINS)
 
 def _topic_overlap(question: str, ch: dict) -> int:
-    """
-    Lightweight overlap of question terms with title/URL (2pts) and body (1pt).
-    Softly favors pages whose title/URL/text contain the topic terms.
-    """
     q = question.lower()
     title_url = (ch.get("title", "") + " " + ch.get("url", "")).lower()
     text = (ch.get("text", "") or "").lower()[:1200]
 
     terms = set(t for t in re.findall(r"[a-z0-9\-]+", q) if len(t) > 2)
-
-    # expand common acronyms
     for k, v in ACRONYM_MAP.items():
         if k in terms:
             terms.add(v)
@@ -92,11 +88,6 @@ def _topic_overlap(question: str, ch: dict) -> int:
     return score
 
 def _select_citations(question: str, used_chunks: list, raw_hits: list, k: int) -> list[str]:
-    """
-    Pick the top-k URLs by (topic overlap, domain pref, sim/rerank score).
-    Falls back to first-appearance order if no scores computed.
-    """
-    # map chunk id -> sim/rerank score for tie-breaks
     sim_map = {}
     for s, ch in raw_hits:
         if isinstance(s, (int, float)):
@@ -107,7 +98,7 @@ def _select_citations(question: str, used_chunks: list, raw_hits: list, k: int) 
     for ch in candidates:
         url = ch["url"]
         tscore = _topic_overlap(question, ch)
-        dscore = -_domain_rank(url)  # higher is better after sort
+        dscore = -_domain_rank(url)  # higher is better
         sscore = sim_map.get(id(ch), 0.0)
         scored.append(((tscore, dscore, sscore), url))
 
@@ -120,11 +111,33 @@ def _select_citations(question: str, used_chunks: list, raw_hits: list, k: int) 
         out.append(url)
         if len(out) >= k:
             break
-
     if not out:
         out = _unique_urls_in_order(candidates)[:k]
     return out
 # -------------------------------------------------------------------
+
+def _expand_acronyms(q: str) -> str:
+    def repl(m):
+        t = m.group(0)
+        exp = ACRONYM_MAP.get(t.lower())
+        return f"{t} ({exp})" if exp else t
+    return re.sub(r"\b(SSRF|XSS|CSRF|IDOR|SQLi|SSTI)\b", repl, q, flags=re.IGNORECASE)
+
+def _rrf_fuse(dense: List[Tuple[float, Dict]], bm25: List[Tuple[float, Dict]], k: int = 60) -> List[Tuple[float, Dict]]:
+    """
+    Reciprocal Rank Fusion over URL keys to avoid dup-chunk collisions.
+    """
+    def key_of(ch):
+        return ch.get("url", "") + "::" + ch.get("title", "")
+    ranks: Dict[str, float] = {}
+    obj: Dict[str, Dict] = {}
+    for lst in (dense, bm25):
+        for rank, (_score, ch) in enumerate(lst, start=1):
+            key = key_of(ch)
+            obj[key] = ch
+            ranks[key] = ranks.get(key, 0.0) + 1.0 / (k + rank)
+    fused = sorted([(score, obj[k]) for k, score in ranks.items()], key=lambda x: x[0], reverse=True)
+    return fused
 
 class RAGPipeline:
     def __init__(self, models_cfg="configs/models.yaml", index_dir="data/index"):
@@ -141,12 +154,18 @@ class RAGPipeline:
         # Retrieval knobs
         r = self.cfg.get("retrieval", {}) or {}
         self.top_k                 = int(r.get("top_k", 5))
-        self.candidate_multiplier  = int(r.get("candidate_multiplier", 3))
+        self.candidate_multiplier  = int(r.get("candidate_multiplier", 5))
         self.max_chunks_per_url    = int(r.get("max_chunks_per_url", 2))
-        self.citations_k           = int(r.get("citations_k", 1))  # default 1 now
+        self.citations_k           = int(r.get("citations_k", 1))  # default single cite
         self.min_hits_for_grounded = int(r.get("min_hits_for_grounded", 2))
         self.score_threshold       = float(r.get("score_threshold", 0.35))
         self.open_domain_fallback  = bool(r.get("open_domain_fallback", True))
+
+        # Hybrid
+        self.hybrid_enabled  = bool(r.get("hybrid_enabled", True))
+        self.hybrid_fusion   = r.get("hybrid_fusion", "rrf")  # rrf | weighted
+        self.bm25_topn       = int(r.get("bm25_topn", self.top_k * self.candidate_multiplier))
+        self.bm25_weight     = float(r.get("bm25_weight", 0.35))  # only if weighted
 
         # Optional reranker
         self.use_rerank      = bool(r.get("use_rerank", False))
@@ -161,7 +180,7 @@ class RAGPipeline:
 
         # Memory
         self.mem_store   = MemoryStore(embedder=self.embedder)
-        self.mem         = self.mem_store  # keep UI compatibility
+        self.mem         = self.mem_store
         self.mem_enabled = bool(r.get("mem_enabled", True))
         self.mem_k       = int(r.get("mem_k", 3))
         self.mem_manager = MemoryManager(
@@ -173,13 +192,6 @@ class RAGPipeline:
         )
 
     # ----------------- helpers -----------------
-    def _expand_acronyms(self, q: str) -> str:
-        def repl(m):
-            t = m.group(0)
-            exp = ACRONYM_MAP.get(t.lower())
-            return f"{t} ({exp})" if exp else t
-        return re.sub(r"\b(SSRF|XSS|CSRF|IDOR|SQLi|SSTI)\b", repl, q, flags=re.IGNORECASE)
-
     def _embed_query(self, q: str) -> np.ndarray:
         e = self.embedder.encode([q], normalize_embeddings=True)
         return np.asarray(e, dtype="float32")
@@ -190,8 +202,7 @@ class RAGPipeline:
         if self.reranker is None:
             self.reranker = CrossEncoder(self.reranker_model, max_length=512)
 
-    def _rerank(self, question: str, hits):
-        """hits = list[(score, chunk)]. Return list[(new_score, chunk)] sorted desc."""
+    def _rerank(self, question: str, hits: List[Tuple[float, Dict]]):
         if not self.reranker:
             return hits
         top_n = min(self.reranker_top_n, len(hits))
@@ -223,7 +234,6 @@ class RAGPipeline:
             )
             resp.raise_for_status()
             return resp.json().get("response", "").strip()
-
         elif self.llm_provider == "openai":
             from openai import OpenAI
             client = OpenAI()
@@ -234,21 +244,67 @@ class RAGPipeline:
                 temperature=self.temperature,
             )
             return chat.choices[0].message.content.strip()
-
         else:
             raise ValueError(f"Unknown llm provider: {self.llm_provider}")
+
+    # ----------------- retrieval core -----------------
+    def _dense_candidates(self, q_text: str, k: int) -> List[Tuple[float, Dict]]:
+        q_emb = self._embed_query(q_text)
+        return self.store.search(q_emb, top_k=k)
+
+    def _bm25_candidates(self, q_text: str, k: int) -> List[Tuple[float, Dict]]:
+        return self.store.search_bm25(q_text, top_k=k)
+
+    def _hybrid_candidates(self, q_text: str, k: int) -> List[Tuple[float, Dict]]:
+        dense = self._dense_candidates(q_text, k)
+        try:
+            bm25 = self._bm25_candidates(q_text, self.bm25_topn)
+        except Exception:
+            bm25 = []  # if rank-bm25 not installed, silently skip
+        if not bm25:
+            return dense
+        if self.hybrid_fusion == "weighted":
+            # Min-max normalize each list, then weighted sum by URL key
+            def mm_norm(lst):
+                if not lst:
+                    return []
+                import numpy as _np
+                scores = _np.array([s for s, _ in lst], dtype="float32")
+                mn, mx = float(scores.min()), float(scores.max())
+                denom = (mx - mn) if (mx - mn) > 1e-6 else 1.0
+                return [((s - mn) / denom, ch) for s, ch in lst]
+            d = mm_norm(dense)
+            b = mm_norm(bm25)
+            def key(ch): return ch.get("url", "") + "::" + ch.get("title", "")
+            agg: Dict[str, float] = {}
+            ref: Dict[str, Dict] = {}
+            for s, ch in d:
+                kkey = key(ch); ref[kkey] = ch
+                agg[kkey] = agg.get(kkey, 0.0) + (1.0 - self.bm25_weight) * float(s)
+            for s, ch in b:
+                kkey = key(ch); ref[kkey] = ch
+                agg[kkey] = agg.get(kkey, 0.0) + self.bm25_weight * float(s)
+            fused = sorted([(sc, ref[k]) for k, sc in agg.items()], key=lambda x: x[0], reverse=True)
+        else:
+            fused = _rrf_fuse(dense, bm25)  # default
+        return fused[:k]
 
     # ----------------- public API -----------------
     @record_time("retrieval_ms")
     def retrieve(self, question: str, k: int | None = None, diversify: bool | None = None):
-        """Return the top-k chunks for a question (optionally diversified)."""
         k = k or self.top_k
         if diversify is None:
             diversify = True
-        q_text = self._expand_acronyms(question)
-        q_emb = self._embed_query(q_text)
+        q_text = _expand_acronyms(question)
 
-        raw_hits = self.store.search(q_emb, top_k=k * self.candidate_multiplier)  # [(score, chunk), ...]
+        # candidates
+        cand_k = k * self.candidate_multiplier
+        if self.hybrid_enabled:
+            raw_hits = self._hybrid_candidates(q_text, cand_k)
+        else:
+            raw_hits = self._dense_candidates(q_text, cand_k)
+
+        # optional rerank
         if self.use_rerank:
             self._maybe_init_reranker()
             raw_hits = self._rerank(q_text, raw_hits)
@@ -260,22 +316,26 @@ class RAGPipeline:
 
     @record_time("end_to_end_ms")
     def answer(self, question: str):
-        q_text = self._expand_acronyms(question)
+        q_text = _expand_acronyms(question)
 
-        # 0) memory first (non-cited)
+        # memory first
         mem_snips = self.mem_manager.retrieve(question, top_k=self.mem_k) if self.mem_enabled else []
 
-        # 1) retrieval (with optional rerank)
-        q_emb = self._embed_query(q_text)
-        raw_hits = self.store.search(q_emb, top_k=self.top_k * self.candidate_multiplier)
+        # candidates
+        cand_k = self.top_k * self.candidate_multiplier
+        if self.hybrid_enabled:
+            raw_hits = self._hybrid_candidates(q_text, cand_k)
+        else:
+            raw_hits = self._dense_candidates(q_text, cand_k)
+
         if self.use_rerank:
             self._maybe_init_reranker()
             raw_hits = self._rerank(q_text, raw_hits)
 
-        # 2) select context
+        # select context
         context_chunks = _diversify_chunks(raw_hits, k=self.top_k, max_per_url=self.max_chunks_per_url)
 
-        # 3) simple confidence gating
+        # gating (skip if rerank on)
         top_score = None
         if raw_hits:
             s0 = raw_hits[0][0]
@@ -283,7 +343,6 @@ class RAGPipeline:
                 top_score = float(s0)
 
         def _score_passes(score, threshold):
-            # If reranking is on, skip score gating (cross-encoder scores aren’t cosine).
             if self.use_rerank:
                 return True
             if score is None or threshold <= 0.0:
@@ -295,7 +354,6 @@ class RAGPipeline:
         have_enough_hits = len([c for c in context_chunks if c.get("url", "")]) >= self.min_hits_for_grounded
         score_ok = _score_passes(top_score, self.score_threshold)
 
-        # 4) grounded mode
         if have_enough_hits and score_ok:
             if mem_snips:
                 mem_chunk = {"title": "User memory", "url": "", "text": "• " + "\n• ".join(mem_snips)}
@@ -304,21 +362,17 @@ class RAGPipeline:
             prompt = build_prompt(question, context_chunks)
             answer = self._call_llm(prompt, system=SYSTEM)
 
-            # --- NEW: topic-aware single-citation selection ---
             num_cites = max(1, int(self.citations_k))
             cite_urls = _select_citations(q_text, context_chunks, raw_hits, num_cites)
-            # ---------------------------------------------------
 
             if cite_urls and not re.search(r"(?im)^\s*Sources?\s*:", answer):
                 footer = "Sources:\n" + "\n".join(f"[{i+1}] {u}" for i, u in enumerate(cite_urls))
                 answer = f"{answer}\n\n{footer}"
             return answer
 
-        # 5) open-domain fallback (with a tiny memory preface)
         if self.open_domain_fallback:
             mem_block = self._format_mem_block(mem_snips)
             general_prompt = (mem_block + f"User question: {question}").strip()
             return self._call_llm(general_prompt, system=GENERAL_SYSTEM)
 
-        # 6) strict mode
         return "I couldn’t find enough information in the indexed corpus to answer that."

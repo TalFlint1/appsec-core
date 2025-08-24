@@ -29,6 +29,10 @@ retrieval:
   min_hits_for_grounded: 2
   score_threshold: 0.35
   open_domain_fallback: true
+  hybrid_enabled: true
+  hybrid_fusion: rrf
+  bm25_topn: 50
+  bm25_weight: 0.35
 
   # memory
   mem_enabled: true

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import os, re, csv, json, argparse
 from pathlib import Path
-import importlib, sys
+import sys
 
 # Ensure local package importable
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,8 +10,10 @@ if str(ROOT) not in sys.path:
 
 from src.rag.pipeline import RAGPipeline  # noqa
 
+
 def ensure_eval_seed(path: Path):
-    if path.exists(): return
+    if path.exists():
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = [
         ["What is SQL Injection and one key mitigation?", r"cheatsheetseries.*SQL_Injection_Prevention"],
@@ -33,8 +35,17 @@ def ensure_eval_seed(path: Path):
     ]
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["question","expected_url_regex"])
+        w.writerow(["question", "expected_url_regex"])
         w.writerows(rows)
+
+
+def ndcg_at_k(rank: int, k: int) -> float:
+    """Single relevant doc DCG@k with gain=1."""
+    if rank < 1 or rank > k:
+        return 0.0
+    import math
+    return 1.0 / math.log2(rank + 1)
+
 
 def run_eval(k: int, ablation: str, outdir: Path):
     pipe = RAGPipeline()
@@ -44,6 +55,8 @@ def run_eval(k: int, ablation: str, outdir: Path):
 
     total = 0
     hits = 0
+    mrr_sum = 0.0
+    ndcg_sum = 0.0
     details = []
     with eval_path.open("r", encoding="utf-8") as f:
         rdr = csv.DictReader(f)
@@ -52,23 +65,39 @@ def run_eval(k: int, ablation: str, outdir: Path):
             pat = row["expected_url_regex"].strip()
             try:
                 chunks = pipe.retrieve(q, k=k, diversify=diversify)
-                urls = [c.get("url","") for c in chunks if c.get("url")]
-                ok = any(re.search(pat, u, re.IGNORECASE) for u in urls)
-                details.append({"q": q, "pattern": pat, "urls": urls, "hit": bool(ok)})
+                urls = [c.get("url", "") for c in chunks if c.get("url")]
+                # find rank (1-indexed) of first match
+                rank = 0
+                for i, u in enumerate(urls, start=1):
+                    if re.search(pat, u, re.IGNORECASE):
+                        rank = i
+                        break
+                hit = (rank > 0 and rank <= k)
+                details.append({"q": q, "pattern": pat, "urls": urls, "hit": bool(hit), "rank": rank or None})
                 total += 1
-                if ok: hits += 1
+                if hit:
+                    hits += 1
+                    mrr_sum += 1.0 / rank
+                    ndcg_sum += ndcg_at_k(rank, k)
             except Exception as e:
                 details.append({"q": q, "pattern": pat, "error": str(e), "hit": False})
                 total += 1
 
-    hit_rate = 100.0 * hits / max(1,total)
+    hit_rate = 100.0 * hits / max(1, total)
+    recall_at_k = hit_rate  # with 1 relevant per query, recall@k == hit@k
+    mrr_at_k = 100.0 * (mrr_sum / max(1, total))
+    ndcg_at_k_pct = 100.0 * (ndcg_sum / max(1, total))
+
     out = {
         "top_k": k,
         "ablation": ablation,
         "total": total,
         "hits": hits,
         "hit_rate_pct": round(hit_rate, 2),
-        "details": details[:50],  # keep output light; full detail not necessary
+        "recall_at_k_pct": round(recall_at_k, 2),
+        "mrr_at_k_pct": round(mrr_at_k, 2),
+        "ndcg_at_k_pct": round(ndcg_at_k_pct, 2),
+        "details": details[:50],
     }
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / f"hit_rate_{ablation}.json").write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -76,7 +105,10 @@ def run_eval(k: int, ablation: str, outdir: Path):
     # Append to metrics report
     md = [
         f"## Retrieval quality (ablation = {ablation})",
-        f"- Top-{k} hit rate: **{out['hit_rate_pct']}%** ({hits}/{total})",
+        f"- Top-{k} Hit@{k}: **{out['hit_rate_pct']}%** ({hits}/{total})",
+        f"- Recall@{k}: **{out['recall_at_k_pct']}%**",
+        f"- MRR@{k}: **{out['mrr_at_k_pct']}%**",
+        f"- nDCG@{k}: **{out['ndcg_at_k_pct']}%**",
         "",
     ]
     report = outdir / "metrics_report.md"
@@ -87,13 +119,15 @@ def run_eval(k: int, ablation: str, outdir: Path):
 
     print(json.dumps(out, indent=2))
 
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--k", type=int, default=5)
-    ap.add_argument("--ablation", choices=["baseline","current"], default="current")
+    ap.add_argument("--ablation", choices=["baseline", "current"], default="current")
     ap.add_argument("--outdir", default="metrics")
     args = ap.parse_args()
     run_eval(args.k, args.ablation, Path(args.outdir))
+
 
 if __name__ == "__main__":
     main()
