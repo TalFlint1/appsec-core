@@ -15,26 +15,81 @@ def ensure_eval_seed(path: Path):
     if path.exists():
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+#     rows = [
+#         ["What is SQL Injection and one key mitigation?",
+#  r"(cheatsheetseries\.owasp\.org/cheatsheets/(SQL_Injection_Prevention|Injection_Prevention|Query_Parameterization)_Cheat_Sheet\.html|owasp\.org/Top10/A03_2021-Injection/)"],
+#         ["Define SSRF and a common defense.", r"owasp\.org/Top10.*SSRF"],
+#         ["What is Insecure Design and one mitigation pattern?", r"owasp\.org/Top10.*Insecure_Design"],
+#         #["List the three main XSS types and a core mitigation.", r"cheatsheetseries.*XSS_Prevention"],
+#         ["What is a broken access control example?", r"owasp\.org/Top10.*Broken_Access_Control"],
+#         ["Explain insecure deserialization risk.", r"(owasp\.org/Top10|cheatsheetseries).*Deserialization"],
+#         ["What is command injection vs SQLi?", r"portswigger\.net.*(command-injection|SQL-injection)"],
+#         ["What is CSRF and a modern defense?", r"(cheatsheetseries.*Cross-Site_Request_Forgery|CSRF)"],
+#         ["Explain security misconfiguration and a hardening approach.", r"owasp\.org/Top10.*Security_Misconfiguration"],
+#         ["Give an example of cryptographic failure.", r"owasp\.org/Top10.*Cryptographic_Failures"],
+#         ["How to validate redirects/forwards safely?", r"cheatsheetseries.*Open_Redirect"],
+#         ["What is IDOR and how to prevent it?", r"portswigger\.net.*(idor|insecure-direct-object)"],
+#         ["Rate limiting best practices?", r"(cheatsheetseries.*Rate_Limiting|ASVS)"],
+#         ["What is path traversal and one mitigation?", r"portswigger\.net.*path-traversal"],
+#         ["Explain parameterized queries and why they matter.", r"cheatsheetseries.*SQL_Injection_Prevention"],
+#         ["What are risks of using vulnerable or outdated components and one mitigation?", r"owasp\.org/Top10.*Vulnerable_and_Outdated_Components"],
+#         #["CSP basics for XSS mitigation?", r"cheatsheetseries.*Content_Security_Policy"],
+#         ["What’s a secure password storage approach?", r"cheatsheetseries.*Password_Storage"],
+#     ]
     rows = [
-        ["What is SQL Injection and one key mitigation?", r"cheatsheetseries.*SQL_Injection_Prevention"],
-        ["Define SSRF and a common defense.", r"owasp\.org/Top10.*SSRF"],
-        ["What is Insecure Design and one mitigation pattern?", r"owasp\.org/Top10.*Insecure_Design"],
-        #["List the three main XSS types and a core mitigation.", r"cheatsheetseries.*XSS_Prevention"],
-        ["What is a broken access control example?", r"owasp\.org/Top10.*Broken_Access_Control"],
-        ["Explain insecure deserialization risk.", r"(owasp\.org/Top10|cheatsheetseries).*Deserialization"],
-        ["What is command injection vs SQLi?", r"portswigger\.net.*(command-injection|SQL-injection)"],
-        ["What is CSRF and a modern defense?", r"(cheatsheetseries.*Cross-Site_Request_Forgery|CSRF)"],
-        ["Explain security misconfiguration and a hardening approach.", r"owasp\.org/Top10.*Security_Misconfiguration"],
-        ["Give an example of cryptographic failure.", r"owasp\.org/Top10.*Cryptographic_Failures"],
-        ["How to validate redirects/forwards safely?", r"cheatsheetseries.*Open_Redirect"],
-        ["What is IDOR and how to prevent it?", r"portswigger\.net.*(idor|insecure-direct-object)"],
-        ["Rate limiting best practices?", r"(cheatsheetseries.*Rate_Limiting|ASVS)"],
-        ["What is path traversal and one mitigation?", r"portswigger\.net.*path-traversal"],
-        ["Explain parameterized queries and why they matter.", r"cheatsheetseries.*SQL_Injection_Prevention"],
-        ["What are risks of using vulnerable or outdated components and one mitigation?", r"owasp\.org/Top10.*Vulnerable_and_Outdated_Components"],
-        #["CSP basics for XSS mitigation?", r"cheatsheetseries.*Content_Security_Policy"],
-        ["What’s a secure password storage approach?", r"cheatsheetseries.*Password_Storage"],
-    ]
+    ["What is SQL Injection and one key mitigation?",
+     r"^(?:https?://)?(?:www\.)?(?:owasp\.org/Top10/A03_2021-Injection/?|cheatsheetseries\.owasp\.org/cheatsheets/(?:SQL_Injection_Prevention|Query_Parameterization)_Cheat_Sheet\.html)$"],
+
+    ["Define SSRF and a common defense.",
+     r"^(?:https?://)?(?:www\.)?(?:owasp\.org/Top10/A10_2021-Server-Side_Request_Forgery_\(SSRF\)/?|cheatsheetseries\.owasp\.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet\.html)$"],
+
+    ["What is Insecure Design and one mitigation pattern?",
+     r"^(?:https?://)?(?:www\.)?(?:owasp\.org/Top10/A04_2021-Insecure_Design/?|cheatsheetseries\.owasp\.org/cheatsheets/Secure_Product_Design_Cheat_Sheet\.html)$"],
+
+    # ["List the three main XSS types and a core mitigation.", r"cheatsheetseries.*XSS_Prevention"],
+
+    ["What is a broken access control example?",
+     r"^(?:https?://)?(?:www\.)?(?:owasp\.org/Top10/A01_2021-Broken_Access_Control/?|cheatsheetseries\.owasp\.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet\.html)$"],
+
+    ["Explain insecure deserialization risk.",
+     r"^(?:https?://)?(?:www\.)?(?:owasp\.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/?|cheatsheetseries\.owasp\.org/cheatsheets/Deserialization_Cheat_Sheet\.html)$"],
+
+    ["What is command injection vs SQLi?",
+     r"^(?:https?://)?(?:www\.)?(?:cheatsheetseries\.owasp\.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet\.html|owasp\.org/Top10/A03_2021-Injection/?)$"],
+
+    ["What is CSRF and a modern defense?",
+     r"^(?:https?://)?(?:www\.)?(?:cheatsheetseries\.owasp\.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet\.html|cwe\.mitre\.org/data/definitions/352\.html)$"],
+
+    ["Explain security misconfiguration and a hardening approach.",
+     r"^(?:https?://)?(?:www\.)?owasp\.org/Top10/A0(?:5_2021-Security_Misconfiguration|6_2021-Vulnerable_and_Outdated_Components)/?$"],
+
+    ["Give an example of cryptographic failure.",
+     r"^(?:https?://)?(?:www\.)?(?:owasp\.org/Top10/A02_2021-Cryptographic_Failures/?|cheatsheetseries\.owasp\.org/cheatsheets/Password_Storage_Cheat_Sheet\.html)$"],
+
+    ["How to validate redirects/forwards safely?",
+     r"^(?:https?://)?(?:www\.)?(?:cheatsheetseries\.owasp\.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet\.html|cwe\.mitre\.org/data/definitions/601\.html)$"],
+
+    ["What is IDOR and how to prevent it?",
+     r"^(?:https?://)?(?:www\.)?(?:owasp\.org/Top10/A01_2021-Broken_Access_Control/?|cheatsheetseries\.owasp\.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet\.html)$"],
+
+    ["Rate limiting best practices?",
+     r"^(?:https?://)?(?:www\.)?owasp\.org/Top10/A0(?:1_2021-Broken_Access_Control|7_2021-Identification_and_Authentication_Failures)/?$"],
+
+    ["What is path traversal and one mitigation?",
+     r"^(?:https?://)?(?:www\.)?(?:cwe\.mitre\.org/data/definitions/22\.html|owasp\.org/www-community/attacks/Path_Traversal/?|owasp\.org/Top10/A01_2021-Broken_Access_Control/?)$"],
+
+    ["Explain parameterized queries and why they matter.",
+     r"^(?:https?://)?(?:www\.)?cheatsheetseries\.owasp\.org/cheatsheets/(?:SQL_Injection_Prevention_Cheat_Sheet|Query_Parameterization_Cheat_Sheet)\.html$"],
+
+    ["What are risks of using vulnerable or outdated components and one mitigation?",
+     r"^(?:https?://)?(?:www\.)?owasp\.org/Top10/A0(?:6_2021-Vulnerable_and_Outdated_Components|8_2021-Software_and_Data_Integrity_Failures)/?$"],
+
+    # ["CSP basics for XSS mitigation?", r"cheatsheetseries.*Content_Security_Policy"],
+
+    ["What’s a secure password storage approach?",
+     r"^(?:https?://)?(?:www\.)?(?:cheatsheetseries\.owasp\.org/cheatsheets/Password_Storage_Cheat_Sheet\.html|owasp\.org/Top10/A02_2021-Cryptographic_Failures/?)$"],
+]
+
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["question", "expected_url_regex"])
