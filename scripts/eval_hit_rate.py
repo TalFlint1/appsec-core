@@ -18,7 +18,8 @@ def ensure_eval_seed(path: Path):
     rows = [
         ["What is SQL Injection and one key mitigation?", r"cheatsheetseries.*SQL_Injection_Prevention"],
         ["Define SSRF and a common defense.", r"owasp\.org/Top10.*SSRF"],
-        ["List the three main XSS types and a core mitigation.", r"cheatsheetseries.*XSS_Prevention"],
+        ["What is Insecure Design and one mitigation pattern?", r"owasp\.org/Top10.*Insecure_Design"],
+        #["List the three main XSS types and a core mitigation.", r"cheatsheetseries.*XSS_Prevention"],
         ["What is a broken access control example?", r"owasp\.org/Top10.*Broken_Access_Control"],
         ["Explain insecure deserialization risk.", r"(owasp\.org/Top10|cheatsheetseries).*Deserialization"],
         ["What is command injection vs SQLi?", r"portswigger\.net.*(command-injection|SQL-injection)"],
@@ -30,7 +31,8 @@ def ensure_eval_seed(path: Path):
         ["Rate limiting best practices?", r"(cheatsheetseries.*Rate_Limiting|ASVS)"],
         ["What is path traversal and one mitigation?", r"portswigger\.net.*path-traversal"],
         ["Explain parameterized queries and why they matter.", r"cheatsheetseries.*SQL_Injection_Prevention"],
-        ["CSP basics for XSS mitigation?", r"cheatsheetseries.*Content_Security_Policy"],
+        ["What are risks of using vulnerable or outdated components and one mitigation?", r"owasp\.org/Top10.*Vulnerable_and_Outdated_Components"],
+        #["CSP basics for XSS mitigation?", r"cheatsheetseries.*Content_Security_Policy"],
         ["What’s a secure password storage approach?", r"cheatsheetseries.*Password_Storage"],
     ]
     with path.open("w", newline="", encoding="utf-8") as f:
