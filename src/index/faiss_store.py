@@ -7,7 +7,7 @@ import json
 import re
 import numpy as np
 import faiss
-from utils.acronyms import expand_query_text, acronym_signal_boost
+from ..utils.acronyms import expand_query_text, acronym_signal_boost
 
 # ---- Optional BM25 import: runtime vs typing split ----
 try:
