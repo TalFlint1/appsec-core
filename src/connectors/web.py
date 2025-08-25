@@ -4,7 +4,6 @@ from collections import deque, defaultdict
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 import urllib.robotparser as urobot
-
 import requests
 from bs4 import BeautifulSoup
 import trafilatura
