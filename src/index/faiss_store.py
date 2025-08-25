@@ -128,31 +128,54 @@ class FaissStore:
             raise RuntimeError("rank-bm25 is not installed. Please `pip install rank-bm25`.")
         texts: List[str] = []
         for m in self.meta:
-            txt = m.get("text")
-            if not txt:
-                # fallback: combine title + sectionish fields if text missing
-                pieces = [m.get("title", ""), m.get("section", ""), m.get("summary", "")]
-                txt = " ".join([p for p in pieces if p])
-            texts.append(txt or "")
+            title = m.get("title", "") or ""
+            body  = m.get("text", "") or ""
+            # include title so pages like "Cross-Site Request Forgery..." get strong lexical signal
+            txt = f"{title} {body}".strip()
+            texts.append(txt)
         self._bm25_docs = [_simple_tokens(t) for t in texts]
-        # type: ignore[arg-type] is safe because _bm25_docs is List[List[str]]
         self._bm25 = BM25OkapiRuntime(self._bm25_docs)  # type: ignore[call-arg]
 
-    def search_bm25(self, query: str, top_k: int = 50) -> List[Tuple[float, Dict]]:
+
+    def search_bm25(self, query: str, top_k: int = 50, expand: bool = True, boost: bool = True) -> List[Tuple[float, Dict]]:
         self._ensure_bm25()
         assert self._bm25 is not None and self._bm25_docs is not None
-        q_tokens = _simple_tokens(query)
+
+        # expand acronyms (e.g., "CSRF" -> "... cross-site request forgery ...")
+        q = expand_query_text(query) if expand else query
+        q_tokens = _simple_tokens(q)
+
         scores = self._bm25.get_scores(q_tokens)  # numpy array length = n_docs
-        # argsort descending and take top_k
-        idxs = np.argsort(scores)[::-1][:top_k]
-        out: List[Tuple[float, Dict]] = []
+
+        # over-fetch a bit before boosting
+        idxs = np.argsort(scores)[::-1][: top_k * 2]
+        pairs: List[Tuple[float, Dict]] = []
         for i in idxs:
             sc = float(scores[int(i)])
             if sc <= 0.0:
-                # BM25 can return zeros for totally unrelated docs; skip tail
                 continue
-            out.append((sc, self.meta[int(i)]))
-        return out
+            pairs.append((sc, self.meta[int(i)]))
+
+        if not boost or not pairs:
+            return pairs[:top_k]
+
+        # mutable copies for boosting
+        objs = []
+        for s, m in pairs:
+            objs.append({
+                "score": float(s),
+                "title": m.get("title", ""),
+                "text": m.get("text", "") or "",
+                "url": m.get("url", "") or "",
+                "__meta__": m,
+            })
+
+        # small positive nudge if hit mentions the expansion terms (no URL hardcoding)
+        objs = acronym_signal_boost(query, objs, alpha=0.15)
+
+        objs.sort(key=lambda x: x["score"], reverse=True)
+        return [(o["score"], o["__meta__"]) for o in objs[:top_k]]
+
 
     # -------- Utilities --------
     @property
