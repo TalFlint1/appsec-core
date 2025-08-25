@@ -249,8 +249,8 @@ class RAGPipeline:
 
     # ----------------- retrieval core -----------------
     def _dense_candidates(self, q_text: str, k: int) -> List[Tuple[float, Dict]]:
-        q_emb = self._embed_query(q_text)
-        return self.store.search(q_emb, top_k=k)
+        # Acronym-aware dense retrieval (CSRF/XSS/SSRF/SQLi/XXE/IDOR...), no URL hardcoding
+        return self.store.search_text(q_text, embedder=self.embedder, top_k=k, boost=True)
 
     def _bm25_candidates(self, q_text: str, k: int) -> List[Tuple[float, Dict]]:
         return self.store.search_bm25(q_text, top_k=k)

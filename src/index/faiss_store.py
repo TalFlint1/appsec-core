@@ -7,6 +7,7 @@ import json
 import re
 import numpy as np
 import faiss
+from utils.acronyms import expand_query_text, acronym_signal_boost
 
 # ---- Optional BM25 import: runtime vs typing split ----
 try:
@@ -80,6 +81,43 @@ class FaissStore:
             if idx == -1:
                 continue
             results.append((float(score), self.meta[int(idx)]))
+        return results
+    
+    # -------- Convenience: text → embed → FAISS (+ acronym handling) --------
+    def _encode_query(self, embedder, query_texts: List[str]) -> np.ndarray:
+        """
+        Accepts either a SentenceTransformer-like object with .encode(...),
+        or a callable that returns a np.ndarray for a list of texts.
+        Must return shape (n, d) float32.
+        """
+        if hasattr(embedder, "encode"):
+            vecs = embedder.encode(query_texts, normalize_embeddings=True, convert_to_numpy=True)
+        else:
+            # embedder is a callable: def embed(list[str]) -> np.ndarray
+            vecs = embedder(query_texts)
+        vecs = np.asarray(vecs, dtype="float32")
+        return vecs
+
+    def search_text(self, query: str, embedder, top_k: int = 5, boost: bool = True) -> List[Tuple[float, Dict]]:
+        """
+        Text-first search with generic acronym support (CSRF/XSS/SSRF/SQLi/XXE/IDOR...).
+        - Expands the query text so acronyms and full names are both represented.
+        - Encodes the expanded query and searches FAISS.
+        - Optionally applies a tiny content-based boost (URL-agnostic).
+        Returns: List of (score, meta) like .search().
+        """
+        # 1) Expand acronymy queries (no URL assumptions)
+        qx = expand_query_text(query)
+
+        # 2) Encode expanded query and run FAISS
+        qv = self._encode_query(embedder, [qx])
+        results = self.search(qv, top_k=top_k)
+
+        # 3) Optional: small content-based nudge (keeps original format)
+        if boost and results:
+            hits = [{"score": s, **m} for (s, m) in results]
+            hits = acronym_signal_boost(query, hits, alpha=0.12)
+            results = [(h["score"], {k: v for k, v in h.items() if k != "score"}) for h in hits]
         return results
 
     # -------- Keyword index (BM25) --------
